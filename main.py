@@ -1,64 +1,46 @@
-import logging
-import matplotlib.pyplot as plt
-import numpy as np
+import time
 
-from src.utils.logger import configure_root_logger, setup_logger
 from src.maze import Maze
-from src.bps_encode import BPS_Encoder
-from src.path_planner import PathPlanner
-
+from src.maze_generators import RecursiveBacktrackerGenerator
+from src.visualizer import MazeVisualizer
+from src.path_planner import AStarPlanner as AStar
+from src.path_planner import RRTPlanner as RRT
+from src.heuristic import manhattan_distance, euclidean_distance, chebyshev_distance
 
 def main():
-    # Initialize logging
-    configure_root_logger(
-        log_file='.log/NeuralQuest.log',
-        level=logging.DEBUG,
-        console_logging=False
-    )
-    logger = setup_logger(__name__)
-    logger.info("==== Begin NeuralQuest ====")
-    
-    WIDTH, HEIGHT = 5, 5
+    ROWS, COLS = 5, 5
+    CORRIDOR_SIZE, WALL_SIZE = 10, 1
 
-    # Generate a maze
-    maze = Maze(WIDTH, HEIGHT)
-    maze.generate_maze_aldous_broder()
-    maze.set_start_end()
+    gen = RecursiveBacktrackerGenerator()
 
-    # Convert maze to environment points
-    environment_points = maze.to_points()
-    environment_points = np.array(environment_points)
+    # Create the maze and generate it
+    maze = Maze(ROWS, COLS)
+    gen.generate(maze)
 
-    # BPS encoding
-    bps_encoder = BPS_Encoder(environment_points, num_basis_points=16)
-    bps_encoder.compute_encoding(feature_type='distance', basis_point_method='grid')
+    # Convert to occupancy map
+    occupancy_map = maze.to_occupancy_map(corridor_size=CORRIDOR_SIZE, wall_size=WALL_SIZE)
 
-    # Initialize PathPlanner
-    planner = PathPlanner(maze)
+    # Set start and end points
+    maze.set_random_start_and_end(occupancy_map)
 
-    # Perform A* search
-    path = planner.a_star_search()
-    if path is None:
-        print(f"No path found.")
-    else:
-        print(f"Path found!")
+    # Find shortest path
+    heuristic = euclidean_distance
+    #planner = AStar(heuristic=heuristic)
+    planner = RRT()
+    start_time = time.time()
+    path = maze.find_path(planner, occupancy_map)
+    end_time = time.time()
+    print(f"A* Path found in {end_time - start_time:.5f} seconds")
 
-    # Perform RRT search
-    # path = planner.rrt_search()
-    # if path is None:
-    #     print(f"No path found.")
-    # else:
-    #     print(f"Path found!")
+    # Debug path
+    print("Path: ", path)
 
-    # Visualize the maze with environment points and BPS encoding
-    maze.draw_maze(show_environment_points=True,
-                   environment_points=environment_points,
-                   basis_points=bps_encoder.basis_points,
-                   encoding=bps_encoder.encoding,
-                   path=path,
-                   path_label="Path")
-
-    logger.info("==== End NeuralQuest ====")
+    # Visualize
+    #MazeVisualizer.visualize_maze(maze)
+    #MazeVisualizer.visualize_occupancy_map(occupancy_map, maze.start, maze.end)
+    #MazeVisualizer.visualize_path(occupancy_map, path, maze.start, maze.end)
+    MazeVisualizer.visualize_rrt(occupancy_map, planner.nodes, path, maze.start, maze.end)
+    MazeVisualizer.show()
 
 if __name__ == "__main__":
     main()

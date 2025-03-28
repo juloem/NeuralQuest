@@ -1,149 +1,284 @@
-# path_planner.py
-
+from abc import ABC, abstractmethod
 import heapq
 import random
+from math import sqrt, atan2, cos, sin
+from src.bresenham import bresenham
+from src.heuristic import euclidean_distance
 
-class PathPlanner:
-    import heapq
-import random
-from itertools import count  # For unique sequence count
+class PathPlanner(ABC):
+    """
+    Abstract base class for all path planning algorithms.
+    """
+    @abstractmethod
+    def find_path(self, start, end, occupancy_map):
+        """
+        Finds a path from start to end in the given occupancy map.
+        """
+        pass
 
-class PathPlanner:
-    def __init__(self, maze):
-        self.maze = maze
-        self.start = maze.start
-        self.end = maze.end
-        if not self.start or not self.end:
-            raise ValueError("Start or end point not set in the maze.")
-        self.path = None
 
-    def a_star_search(self):
-        open_set = []
-        came_from = {}
-        g_score = {cell: float('inf') for row in self.maze.grid for cell in row}
-        g_score[self.start] = 0
-        f_score = {cell: float('inf') for row in self.maze.grid for cell in row}
-        f_score[self.start] = self.heuristic(self.start, self.end)
-        counter = count()  # Unique sequence count
+class Node:
+    """
+    Represents a node in the grid for path planning.
+    """
+    def __init__(self, position, g=0, h=0, parent=None):
+        self.position = position  # (row, col)
+        self.g = g  # Cost from start to current node
+        self.h = h  # Heuristic cost to the goal
+        self.f = g + h  # Total cost (f = g + h)
+        self.parent = parent  # Parent node for path reconstruction
+        self.cost = 0   # For algorithms that use cost
 
-        # Push the start node onto the heap
-        heapq.heappush(open_set, (f_score[self.start], next(counter), self.start))
+    def __lt__(self, other):
+        return self.f < other.f  # Priority queue compares based on f-cost
 
-        while open_set:
-            current = heapq.heappop(open_set)[2]  # Access the cell
-            if current == self.end:
-                self.path = self.reconstruct_path(came_from, current)
-                return self.path
+class AStarPlanner(PathPlanner):
+    """
+    A* path planning algorithm.
+    """
+    def __init__(self, heuristic=None, allow_diagonal=False):
+        # Movement directions
+        self.directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # Up, Down, Left, Right
+        if allow_diagonal:
+            self.directions += [(-1, -1), (-1, 1), (1, -1), (1, 1)]
 
-            for neighbor, direction in self.maze.get_neighbors(current):
-                if not current.walls[direction]:  # Check if path exists
-                    tentative_g_score = g_score[current] + 1  # Assuming uniform cost
-                    if tentative_g_score < g_score[neighbor]:
-                        came_from[neighbor] = current
-                        g_score[neighbor] = tentative_g_score
-                        f_score[neighbor] = tentative_g_score + self.heuristic(neighbor, self.end)
-                        # Check if neighbor is already in open_set
-                        if neighbor not in [item[2] for item in open_set]:
-                            heapq.heappush(open_set, (f_score[neighbor], next(counter), neighbor))
-        return None  # No path found
-
-    def heuristic(self, cell1, cell2):
-        # Use Manhattan distance as heuristic
-        return abs(cell1.row - cell2.row) + abs(cell1.col - cell2.col)
-
-    def reconstruct_path(self, came_from, current):
-        path = []
-        while current in came_from:
-            path.append(current)
-            current = came_from[current]
-        path.append(self.start)
-        path.reverse()
-        return path
-
-    def rrt_search(self, max_iterations=10000, goal_sample_rate=0.5):
-        if not self.start or not self.end:
-            raise ValueError("Start or end point not set.")
-
-        tree = {self.start: None}  # Node: Parent
-        for _ in range(max_iterations):
-            # Decide whether to sample the goal or a random point
-            if random.random() < goal_sample_rate:
-                random_cell = self.end
-            else:
-                # Randomly select a cell
-                random_cell = self.maze.get_cell(random.randint(0, self.maze.height - 1), random.randint(0, self.maze.width - 1))
-                # Find nearest node in the tree
-                nearest_cell = min(tree.keys(), key=lambda cell: self.distance(cell, random_cell))
-                # Attempt to move towards random_cell from nearest_cell
-                path_segment = self.get_path_segment(nearest_cell, random_cell)
-                if path_segment:
-                    for i in range(1, len(path_segment)):
-                        current_cell = path_segment[i - 1]
-                        next_cell = path_segment[i]
-                        if next_cell not in tree:
-                            tree[next_cell] = current_cell
-                            if next_cell == self.end:
-                                self.path = self.reconstruct_rrt_path(tree, next_cell)
-                                return self.path
-        return None  # No path found
-    
-    def get_path_segment(self, from_cell, to_cell):
-        path = [from_cell]
-        current_cell = from_cell
-        while current_cell != to_cell:
-            dr = to_cell.row - current_cell.row
-            dc = to_cell.col - current_cell.col
-            # Decide direction to move
-            if abs(dr) > abs(dc):
-                step_row = current_cell.row + (1 if dr > 0 else -1)
-                step_col = current_cell.col
-            elif dc != 0:
-                step_row = current_cell.row
-                step_col = current_cell.col + (1 if dc > 0 else -1)
-            else:
-                # Reached the target cell
-                break
-
-            if 0 <= step_row < self.maze.height and 0 <= step_col < self.maze.width:
-                next_cell = self.maze.get_cell(step_row, step_col)
-                direction = self.maze.get_direction(current_cell, next_cell)
-                if not current_cell.walls[direction]:
-                    path.append(next_cell)
-                    current_cell = next_cell
-                    if current_cell == to_cell:
-                        break
-                else:
-                    # Obstacle encountered
-                    break
-            else:
-                # Out of bounds
-                break
-        return path if len(path) > 1 else None
-
-    def distance(self, cell1, cell2):
-        return abs(cell1.row - cell2.row) + abs(cell1.col - cell2.col)
-
-    def get_next_cell(self, from_cell, to_cell):
-        # Determine direction to move
-        dr = to_cell.row - from_cell.row
-        dc = to_cell.col - from_cell.col
-        if abs(dr) > abs(dc):
-            step = (1 if dr > 0 else -1, 0)
+        if heuristic is None:
+            self.heuristic = lambda current, goal: abs(current[0] - goal[0]) + abs(current[1] - goal[1])
         else:
-            step = (0, 1 if dc > 0 else -1)
-        next_row = from_cell.row + step[0]
-        next_col = from_cell.col + step[1]
-        if 0 <= next_row < self.maze.height and 0 <= next_col < self.maze.width:
-            next_cell = self.maze.get_cell(next_row, next_col)
-            direction = self.maze.get_direction(from_cell, next_cell)
-            if not from_cell.walls[direction]:
-                return next_cell
-        return None
+            self.heuristic = heuristic
 
-    def reconstruct_rrt_path(self, tree, current):
-        path = [current]
-        while current in tree and tree[current]:
-            current = tree[current]
-            path.append(current)
+    def find_path(self, start, end, occupancy_map):
+        """
+        Finds the shortest path from start to end using A* algorithm.
+        """
+        # Priority queue for open list
+        open_list = []
+        heapq.heappush(open_list, Node(start, h=self.heuristic(start, end)))
+
+        # Set for closed list
+        closed_set = set()
+
+        # Keep track of visited nodes
+        visited = {}
+
+        while open_list:
+            # Get the node with the lowest f-cost
+            current_node = heapq.heappop(open_list)
+            current_pos = current_node.position
+
+            # Add to closed list
+            closed_set.add(current_pos)
+
+            # Check if goal is reached
+            if current_pos == end:
+                return self.reconstruct_path(current_node)
+
+            # Explore neighbors
+            for direction in self.directions:
+                neighbor_pos = (current_pos[0] + direction[0], current_pos[1] + direction[1])
+
+                # Check bounds
+                if not (0 <= neighbor_pos[0] < len(occupancy_map) and 0 <= neighbor_pos[1] < len(occupancy_map[0])):
+                    continue
+
+                # Skip if neighbor is a wall or already in closed set
+                if occupancy_map[neighbor_pos[0]][neighbor_pos[1]] == 1 or neighbor_pos in closed_set:
+                    continue
+
+                # Calculate costs
+                g_cost = current_node.g + 1
+                h_cost = self.heuristic(neighbor_pos, end)
+                f_cost = g_cost + h_cost
+
+                # Check if the neighbor has been visited with a lower f-cost
+                if neighbor_pos in visited and visited[neighbor_pos].f <= f_cost:
+                    continue
+
+                # Add neighbor to open list
+                neighbor_node = Node(neighbor_pos, g=g_cost, h=h_cost, parent=current_node)
+                heapq.heappush(open_list, neighbor_node)
+                visited[neighbor_pos] = neighbor_node
+
+        # No path found
+        return []
+
+    def reconstruct_path(self, node):
+        """
+        Reconstructs the path from end to start using the parent references.
+        """
+        path = []
+        while node:
+            path.append(node.position)
+            node = node.parent
+        return path[::-1]  # Reverse the path
+    
+class RRTPlanner(PathPlanner):
+    """
+    Rapidly-exploring Random Tree (RRT) path planning algorithm.
+    """
+    def __init__(self, max_iterations=20000, max_step_size=10, goal_tolerance=2):
+        """
+        Initializes the RRT planner.
+        """
+        self.max_iterations = max_iterations
+        self.max_step_size = max_step_size
+        self.goal_tolerance = goal_tolerance
+        self.nodes = []  # Store nodes for visualization
+
+    def find_path(self, start, goal, occupancy_map):
+        """
+        Finds a path from start to goal using the RRT algorithm.
+        """
+        height, width = len(occupancy_map), len(occupancy_map[0])
+
+        # Initialize the tree with the start node
+        root_node = Node(start)
+        self.nodes = [root_node]
+
+        for iteration in range(self.max_iterations):
+            if iteration == self.max_iterations - 1:
+                print("Max iterations reached")
+                return []
+            
+            # Generate a random point in the map
+            rand_point = (random.randint(0, height - 1), random.randint(0, width - 1))
+
+            # Find the nearest node in the tree
+            nearest_node = self.find_nearest_node(rand_point, self.nodes)
+
+            # Create a new node in the direction of rand_point, limited by max_step_size
+            new_node_position = self.steer(nearest_node.position, rand_point, self.max_step_size)
+
+            # Check for collision between nearest_node and new_node_position
+            if not self.collision_detected(nearest_node.position, new_node_position, occupancy_map):
+                # Create new node and add to tree
+                new_node = Node(new_node_position, parent=nearest_node)
+                self.nodes.append(new_node)
+
+                # Check if goal is within goal_tolerance
+                if self.calc_distance(new_node.position, goal) <= self.goal_tolerance:
+                    # Goal reached, construct path
+                    goal_node = Node(goal, parent=new_node)
+                    return self.construct_path(goal_node)
+
+        # Failed to find a path
+        return []
+
+    def find_nearest_node(self, point, nodes):
+        """
+        Finds the nearest node in the tree to the given point.
+        """
+        nearest_dist = float('inf')
+        for node in nodes:
+            dist = self.calc_distance(point, node.position)
+            if dist < nearest_dist:
+                nearest_dist = dist
+                nearest_node = node
+        return nearest_node
+
+    def steer(self, from_pos, to_pos, max_distance):
+        """
+        Returns a new position moved from from_pos towards to_pos, limited by max_distance.
+        """
+        new_pos = list(from_pos)
+        distance = self.calc_distance(from_pos, to_pos)
+        theta = self.calc_angle(from_pos, to_pos)
+
+        # If distance to closes node is less than maximum branch length
+        if max_distance > distance:
+            max_distance = distance
+
+        new_pos[0] += int(max_distance * cos(theta))
+        new_pos[1] += int(max_distance * sin(theta))
+
+        return new_pos
+
+        # from_row, from_col = from_pos
+        # to_row, to_col = to_pos
+
+        # dx = to_col - from_col
+        # dy = to_row - from_row
+        # distance = sqrt(dx**2 + dy**2)
+
+        # if distance == 0:
+        #     return from_pos
+
+        # ratio = min(max_distance / distance, 1.0)
+        # new_row = int(from_row + dy * ratio)
+        # new_col = int(from_col + dx * ratio)
+        # return (new_row, new_col)
+
+    def collision_detected(self, from_pos, to_pos, occupancy_map):
+        """
+        Checks if a path from from_pos to to_pos collides with any obstacles.
+        """
+        width = len(occupancy_map[0])
+        line_cells = self.bresenham_line(from_pos, to_pos)
+        for cell in line_cells:
+            row, col = cell
+            if not (0 <= row < len(occupancy_map) and 0 <= col < len(occupancy_map[0])):
+                return True  # Out of bounds is considered a collision
+            if occupancy_map[row][col] == 1:
+                return True
+        # No collision
+        return False
+    
+    def bresenham_line(self, start, end):
+        """
+        Generates the points along a line between start and end using Bresenham's algorithm.
+        """
+        x0, y0 = start[1], start[0]
+        x1, y1 = end[1], end[0]
+
+        points = []
+
+        dx = abs(x1 - x0)
+        dy = -abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx + dy
+
+        while True:
+            points.append((y0, x0))
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                if x0 == x1:
+                    break
+                err += dy
+                x0 += sx
+            if e2 <= dx:
+                if y0 == y1:
+                    break
+                err += dx
+                y0 += sy
+
+        return points
+
+    def calc_distance(self, p1, p2):
+        """
+        Calculates the Euclidean distance between two points.
+        """
+        return euclidean_distance(p1, p2)
+    
+    def calc_angle(self, p1, p2):
+        """
+        Calculates the angle between two points.
+        """
+        dx = p2[1] - p1[1]
+        dy = p2[0] - p1[0]
+        return atan2(dy, dx)
+
+    def construct_path(self, goal_node):
+        """
+        Constructs the path from start to goal by traversing parent links.
+        """
+        path = []
+        node = goal_node
+        while node.parent:
+            path.append(node.position)
+            node = node.parent
+        path.append(node.position)
         path.reverse()
         return path
